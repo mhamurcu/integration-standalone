@@ -130,14 +130,20 @@ unsigned int hash_string(char *String)
     hash = 65599 * hash + String[i];
   return hash ^ (hash >> 16);
 }
-void get_my_time() {
+String get_my_time() {
   
   time_t seconds = time(NULL);
       
  
         char buffer[32];
-        strftime(buffer, 32, "%Y-%M-%eT%H:%M.%S.000Z\n", localtime(&seconds));
-        Serial.println( buffer);
+        
+        char* returnBuffer;
+        strftime(buffer, 32, "%Y-%m-%eT%H:%M:%S.000Z", localtime(&seconds));
+
+        String returnString;
+        returnString = buffer;
+        //Serial.println( buffer);
+        return returnString;
         //2009-02-22T23:33:02.971Z
         
       

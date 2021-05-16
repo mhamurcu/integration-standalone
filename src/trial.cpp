@@ -28,7 +28,7 @@
  * with slices per model window set to 4. Results in a slice size of 250 ms.
  * For more info: https://docs.edgeimpulse.com/docs/continuous-audio-sampling
  */
-#define EI_CLASSIFIER_SLICES_PER_MODEL_WINDOW 3
+#define EI_CLASSIFIER_SLICES_PER_MODEL_WINDOW 2
 
 #define AT_BAUD_RATE 9600
 
@@ -37,6 +37,7 @@
 #include <PDM.h>
 #include <with_regularization_inference.h>
 #include <Scheduler.h>
+#include <string.h>
 
 /*Include temperature sensor*/
 #include <Wire.h>
@@ -57,15 +58,25 @@ static bool microphone_inference_start(uint32_t n_samples);
 static void pdm_data_ready_inference_callback(void);
 void ei_printf(const char *format, ...);
 void get_currentTime();
-void send_wifi();
+int send_wifi(String postMes, uint8_t whichMeasurement);
 void temp_sensor_loop();
 void loop3();
 void loop2();
+void loop_mic();
 
-typedef struct cough_time_storage_array
-{
+const uint8_t COUGH_MES = 0;
+const uint8_t TEMP_MES = 1;
+const uint8_t HEARTRATE_MES = 2;
+const uint8_t SPO2_MES = 3;
 
-} cough_storage_array;
+char *cough_times;
+String cough_time_string;
+String cough_time_string_array[10];
+String tempString;
+String notPostedMeas = "[";
+int bulkIsNotSent;
+unsigned long currentTime = 0;
+unsigned long prevTime = 0;
 
 time_t seconds;
 
@@ -75,7 +86,8 @@ int led3 = LEDB;
 
 int coughnum = 0;
 int windowcount = 0;
-uint8_t cough_counter_array[500];
+char *cough_counter_array[500];
+char cough_time_to_print[100];
 int32_t cough_counter = 0;
 
 /** Audio buffers, pointers and selectors */
@@ -98,8 +110,8 @@ static int print_results = -(EI_CLASSIFIER_SLICES_PER_MODEL_WINDOW);
 Adafruit_MLX90614 mlx = Adafruit_MLX90614();
 
 /*Wi-fi variables*/
-//char server[] = "3.125.238.65"; ahmetin server
-const char *server = "192.168.43.178";
+char server[] = "3.125.238.65";
+//const char *server = "192.168.43.178";
 WiFiClient client;
 
 unsigned long lastConnectionTime = 0;         // last time you connected to the server, in milliseconds
@@ -113,8 +125,8 @@ void setup()
     // put your setup code here, to run once:
     Serial.begin(115200);
     while (!Serial)
-        ;
-    pinMode(led1, OUTPUT);
+
+        pinMode(led1, OUTPUT);
     pinMode(led2, OUTPUT);
     pinMode(led3, OUTPUT);
     pinMode(9, OUTPUT);
@@ -141,7 +153,7 @@ void setup()
     }
 
     /*Temp sensor begin*/
-    // mlx.begin();
+    mlx.begin();
 
     /* Wi-fi begin*/
     // initialize serial for ESP module
@@ -170,30 +182,29 @@ void setup()
     Serial.println();
     Serial.println("Connected to WiFi network.");
 
-    
-        Serial.println("connected to server");
-        WiFi.sntp("pool.ntp.org");
-        delay(1000);
-        char *deneme = "deneme123";
-        Serial.println(deneme);
-        Serial.println("Waiting for SNTP");
+    Serial.println("connected to server");
 
-        /*WiFi.getTime() returns length of WiFi.my_tok*/
-        Serial.println(WiFi.getTime());
-        Serial.println("my token value");
-        Serial.println(WiFi.my_tok);
-        delay(1000);
-        Serial.println();
-        // setTime(WiFi.getTime() + (SECS_PER_HOUR * TIME_ZONE));
-        /*WiFi.my_tok character arrayi cinsinden asagıdaki gibi dönüyor: 
+    WiFi.sntp("pool.ntp.org");
+    delay(1000);
+    char *deneme = "deneme123";
+    Serial.println(deneme);
+    Serial.println("Waiting for SNTP");
+
+    /*WiFi.getTime() returns length of WiFi.my_tok*/
+    Serial.println(WiFi.getTime());
+    Serial.println("my token value");
+    Serial.println(WiFi.my_tok);
+    delay(1000);
+    Serial.println();
+    // setTime(WiFi.getTime() + (SECS_PER_HOUR * TIME_ZONE));
+    /*WiFi.my_tok character arrayi cinsinden asagıdaki gibi dönüyor: 
   *  WiFi.my_tok = "Thu May 13 20:02:49 2021"
 
   *  
   */
-        time_parser();
-        Serial.println("Time parsing finished");
-        delay(1000);
-    
+    time_parser();
+    Serial.println("Time parsing finished");
+    delay(1000);
 
     /* 
     client.println(("POST /api/v1/symptoms HTTP/1.1"));
@@ -225,7 +236,9 @@ client.println(postBody);
 
     
   }*/
-    Scheduler.startLoopAboveNormal(loop2);
+    // Scheduler.startLoop(loop_mic);
+
+    //Scheduler.startLoopAboveNormal(temp_sensor_loop);
 }
 
 /**
@@ -233,8 +246,34 @@ client.println(postBody);
  */
 void loop()
 {
-
     //delay(1000);
+    while (0)
+    {
+        int gir = millis();
+        if (WiFi.status() == WL_NO_MODULE)
+        {
+            Serial.println();
+            Serial.println("Communication with WiFi module failed!");
+            // don't continue
+            //gonderemedim biriktir
+            //while (true);
+        }
+
+        if (WiFi.status() == WL_CONNECTED)
+        {
+
+            Serial.println("Connected");
+        }
+        else
+            Serial.println("LOST CONNECTION");
+        int cik = millis();
+        Serial.println(cik - gir);
+    }
+
+    time_t seconds = time(NULL);
+
+    uint8_t whichMeasurement = COUGH_MES;
+
     Serial.println("ANA LOOP");
 
     digitalWrite(9, HIGH);
@@ -260,27 +299,31 @@ void loop()
     if (++print_results >= (EI_CLASSIFIER_SLICES_PER_MODEL_WINDOW))
     {
         // print the predictions
-        ei_printf("Predictions ");
-        ei_printf("(DSP: %d ms., Classification: %d ms., Anomaly: %d ms.)",
-                  result.timing.dsp, result.timing.classification, result.timing.anomaly);
-        ei_printf(": \n");
+        //  ei_printf("Predictions ");
+        // ei_printf("(DSP: %d ms., Classification: %d ms., Anomaly: %d ms.)",
+        //  result.timing.dsp, result.timing.classification, result.timing.anomaly);
+        //ei_printf(": \n");
         if (result.classification[0].value > 0.7000)
         {
+            cough_time_string = get_my_time();
+            //  Serial.println(get_my_time());
+            cough_time_string_array[coughnum] = cough_time_string;
+            String postMes = "\", \"cough\":true";
+
+            int a = send_wifi(postMes, whichMeasurement);
             digitalWrite(LEDB, LOW);
             coughnum++;
         }
         else
             digitalWrite(LEDB, HIGH);
         windowcount++;
-        ei_printf("    %s: %.5f\n", result.classification[0].label,
-                  result.classification[0].value);
-        ei_printf("\n");
+        //ei_printf("    %s: %.5f\n", result.classification[0].label,
+        //result.classification[0].value);
+        // ei_printf("\n");
         ei_printf("Cough Count: %d", coughnum);
         ei_printf("\n");
         ei_printf("Window Count: %d", windowcount);
         ei_printf("\n");
-        ei_printf("Current time is: ");
-        get_my_time();
 
         /*my implementation*/
 
@@ -290,7 +333,12 @@ void loop()
 
         print_results = 0;
     }
-    yield();
+    Serial.println(localtime(&seconds)->tm_sec);
+
+    if (((localtime(&seconds)->tm_sec % 10) < 2))
+    {
+        temp_sensor_loop();
+    }
 }
 // Task no.2: blink LED with 0.1 second delay.
 void loop2()
@@ -301,9 +349,9 @@ void loop2()
     {
 
         Serial.println("trying to send_wifi");
-        send_wifi();
+        // send_wifi();
         Serial.println("Waiting for available");
-        delay(7000);
+        delay(10000);
 
         /* while (client.available()) {
     char c = client.read();
@@ -350,43 +398,118 @@ void loop3()
 
 void temp_sensor_loop()
 {
+
+    uint8_t whichMeasurement;
+    String tempString2;
     Serial.print("Ambient = ");
     Serial.print(mlx.readAmbientTempC() + 4.0);
     Serial.print("*C\tObject = ");
     Serial.print(mlx.readObjectTempC() + 4.0);
-    Serial.println("*C");
+    tempString2 = String(mlx.readObjectTempC() + 4.0);
+    whichMeasurement = TEMP_MES;
+    int x = send_wifi(tempString2, whichMeasurement);
 
-    Serial.println();
-    delay(500);
-    yield();
+    Serial.println("looptan cıktı");
 }
 
-void send_wifi()
+int send_wifi(String postMes, uint8_t whichMeasurement)
 {
-    String postBody = "{\"UID\":  \"1610054147005\", \"ts\": \"2012-02-22T23:33:2.971Z\", \"temperature\":35.5";
-    postBody += ", \"cough\":true}";
+    //String postBody3= "{\"UID\":  \"1610054147005\", \"ts\": \"2021-05-15T14:06:08.000Z\", \"temperature\":35.5";
+    String postBody3 = "{\"UID\":  \"1610054147005\", \"ts\": \"2014-02-22T23:33:02.971Z\", \"temperature\":35.5 , \"cough\":true}]";
+    String postBody = "{\"UID\":  \"1\", \"ts\": \"";
+
+    postBody += get_my_time();
+
+    switch (whichMeasurement)
+    {
+    case COUGH_MES:
+        postBody += postMes;
+        postBody += "}";
+        break;
+    case TEMP_MES:
+        postBody += "\", \"temperature\":";
+        postBody += postMes;
+        postBody += "}";
+        break;
+    case HEARTRATE_MES:
+        break;
+    case SPO2_MES:
+        break;
+    default:
+        break;
+    }
+    Serial.println(postBody);
+    // postBody += "\", \"temperature\":37.7";
+    // postBody += ", \"cough\":true},";
+
+    //String post2= "\", \"cough\":true}";
+    // postBody += ", \"cough\":true}";
+    // postBody = postBody + post2;
 
     if (WiFi.status() == WL_NO_MODULE)
     {
         Serial.println();
         Serial.println("Communication with WiFi module failed!");
         // don't continue
-        while (true)
-            ;
+        notPostedMeas = notPostedMeas + postBody + ",";
+        return 0; //gonderemedim biriktir
+        //while (true);
     }
 
     // waiting for connection to Wifi network set with the SetupWiFiConnection sketch
     Serial.println("Waiting for connection to WiFi");
-    while (WiFi.status() != WL_CONNECTED)
+    if (WiFi.status() != WL_CONNECTED) //bagli degilse notposted in sonuna ekle
     {
-        delay(1000);
+        notPostedMeas = notPostedMeas + postBody +  ",";
         Serial.print('.');
+        bulkIsNotSent = 1;
+        return 0;
     }
+    else if(bulkIsNotSent)
+    {
+
+        if (client.connect(server, 80))
+        {
+            Serial.println("connected to server");
+
+            client.println(("POST /api/v1/bulk-symptoms HTTP/1.1"));
+            Serial.println("post 1");
+
+            client.println("Connection: keep-alive");
+            Serial.println("post 2");
+
+            client.println("Content-Type: application/json; charset=utf-8");
+            Serial.println("post 3");
+
+            client.println("Host:epsilon-backend-nswyg.run-eu-central1.goorm.io");
+            // client.println("Host:localhost");
+            Serial.println("notpost 4");
+
+            //client.println("Accept: */*");
+
+            client.println("Content-Length: " + String(notPostedMeas.length() + 1));
+            Serial.println("notpost 5");
+
+            client.println();
+            Serial.println("notpost 6");
+
+            notPostedMeas[notPostedMeas.length() - 1] = ' ';
+            notPostedMeas += "]";
+            Serial.println(notPostedMeas);
+
+            client.println(notPostedMeas);
+            Serial.println("notpost 7");
+            notPostedMeas = '[';
+        }
+
+        bulkIsNotSent = 0;
+    }
+
     Serial.println();
     Serial.println("Connected to WiFi network.");
 
     Serial.println("Starting connection to server...");
-    if (client.connect(server, 3000))
+    if (client.connect(server, 80))
     {
         Serial.println("connected to server");
 
@@ -399,8 +522,8 @@ void send_wifi()
         client.println("Content-Type: application/json; charset=utf-8");
         Serial.println("post 3");
 
-        //client.println("Host:epsilon.run-eu-central1.goorm.io");
-        client.println("Host:localhost");
+        client.println("Host:epsilon-backend-nswyg.run-eu-central1.goorm.io");
+        // client.println("Host:localhost");
         Serial.println("post 4");
 
         //client.println("Accept: */*");
@@ -414,6 +537,7 @@ void send_wifi()
         client.println(postBody);
         Serial.println("post 7");
     }
+    return 1;
 }
 
 void get_currentTime()
@@ -591,7 +715,6 @@ void printWifiStatus()
     Serial.print(rssi);
     Serial.println(" dBm");
 }
-
 #if !defined(EI_CLASSIFIER_SENSOR) || EI_CLASSIFIER_SENSOR != EI_CLASSIFIER_SENSOR_MICROPHONE
 #error "Invalid model for current sensor."
 #endif

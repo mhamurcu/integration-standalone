@@ -1297,7 +1297,7 @@ bool EspAtDrvClass::sntpCfg(const char* server1, const char* server2) {
   LOG_INFO_PRINT_PREFIX();
   LOG_INFO_PRINTLN(F("SNTP config"));
 
-  cmd->print(F("AT+CIPSNTPCFG=1,0,\""));
+  cmd->print(F("AT+CIPSNTPCFG=1,3,\""));
   cmd->print(server1);
   if (server2) {
     cmd->print((FSH_P) QOUT_COMMA_QOUT);

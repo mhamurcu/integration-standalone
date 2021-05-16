@@ -49,4 +49,4 @@
 
 void time_parser();
 unsigned int hash_string(char *String);
-void get_my_time();
+String get_my_time();
