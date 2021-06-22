@@ -32,6 +32,8 @@
 
 #define AT_BAUD_RATE 9600
 
+#define REPORTING_PERIOD_MS 1000
+
 /* Includes ---------------------------------------------------------------- */
 #include <Arduino.h>
 #include <PDM.h>
@@ -49,6 +51,10 @@
 //include real time utility functions
 #include "timeUtil.h"
 
+/*heartrate sensor includes*/
+
+#include "MAX30100_PulseOximeter.h"
+
 //Function Declarations
 void printWifiStatus();
 static void microphone_inference_end(void);
@@ -57,26 +63,18 @@ static bool microphone_inference_record(void);
 static bool microphone_inference_start(uint32_t n_samples);
 static void pdm_data_ready_inference_callback(void);
 void ei_printf(const char *format, ...);
-void get_currentTime();
 int send_wifi(String postMes, uint8_t whichMeasurement);
 void temp_sensor_loop();
-void loop3();
-void loop2();
-void loop_mic();
+void heartRateMeasurement();
 
 const uint8_t COUGH_MES = 0;
 const uint8_t TEMP_MES = 1;
 const uint8_t HEARTRATE_MES = 2;
 const uint8_t SPO2_MES = 3;
 
-char *cough_times;
-String cough_time_string;
-String cough_time_string_array[10];
-String tempString;
+
 String notPostedMeas = "[";
 int bulkIsNotSent;
-unsigned long currentTime = 0;
-unsigned long prevTime = 0;
 
 time_t seconds;
 
@@ -86,9 +84,6 @@ int led3 = LEDB;
 
 int coughnum = 0;
 int windowcount = 0;
-char *cough_counter_array[500];
-char cough_time_to_print[100];
-int32_t cough_counter = 0;
 
 /** Audio buffers, pointers and selectors */
 typedef struct
@@ -110,23 +105,36 @@ static int print_results = -(EI_CLASSIFIER_SLICES_PER_MODEL_WINDOW);
 Adafruit_MLX90614 mlx = Adafruit_MLX90614();
 
 /*Wi-fi variables*/
-char server[] = "3.125.238.65";
-//const char *server = "192.168.43.178";
+//goorm ide ip'si
+//char server[] = "3.125.238.65";
+const char *server = "192.168.43.178";
 WiFiClient client;
+
+/* heart rate sensor*/
+PulseOximeter pox;
+//volatile int beatCount = 0;
+uint32_t tsLastReport = 0;
 
 unsigned long lastConnectionTime = 0;         // last time you connected to the server, in milliseconds
 const unsigned long postingInterval = 10000L; // delay between updates, in milliseconds
 
+void onBeatDetected()
+{
+    Serial.println("Beat!");
+    //beatCount++;
+}
+
 /**
  * @brief      Arduino setup function
  */
+
 void setup()
 {
     // put your setup code here, to run once:
     Serial.begin(115200);
-    while (!Serial)
+    while (!Serial);
 
-        pinMode(led1, OUTPUT);
+    pinMode(led1, OUTPUT);
     pinMode(led2, OUTPUT);
     pinMode(led3, OUTPUT);
     pinMode(9, OUTPUT);
@@ -168,8 +176,7 @@ void setup()
         Serial.println();
         Serial.println("Communication with WiFi module failed!");
         // don't continue
-        while (true)
-            ;
+        while (true);
     }
 
     // waiting for connection to Wifi network set with the SetupWiFiConnection sketch
@@ -186,8 +193,8 @@ void setup()
 
     WiFi.sntp("pool.ntp.org");
     delay(1000);
-    char *deneme = "deneme123";
-    Serial.println(deneme);
+    //char *deneme = "deneme123";
+    //Serial.println(deneme);
     Serial.println("Waiting for SNTP");
 
     /*WiFi.getTime() returns length of WiFi.my_tok*/
@@ -206,39 +213,32 @@ void setup()
     Serial.println("Time parsing finished");
     delay(1000);
 
-    /* 
-    client.println(("POST /api/v1/symptoms HTTP/1.1"));
-    Serial.println("post 1");
 
-   client.println("Connection: keep-alive"); 
-       Serial.println("post 2");
-
-   client.println("Content-Type: application/json; charset=utf-8");
-       Serial.println("post 3");
-
-   //client.println("Host:epsilon.run-eu-central1.goorm.io");
-   client.println("Host:localhost");
-       Serial.println("post 4");
-
-
-
-
-    client.println("Content-Length: " + String(postBody.length()));
-        Serial.println("post 5");
-
-   client.println();
-       Serial.println("post 6");
-
-client.println(postBody);
-    Serial.println("post 7");
- 
-
-
-    
-  }*/
     // Scheduler.startLoop(loop_mic);
 
-    //Scheduler.startLoopAboveNormal(temp_sensor_loop);
+    Serial.print("Initializing pulse oximeter..");
+
+    // Initialize the PulseOximeter instance
+    // Failures are generally due to an improper I2C wiring, missing power supply
+    // or wrong target chip
+    if (!pox.begin())
+    {
+        Serial.println("FAILED");
+        
+    }
+    else
+    {
+      //  Serial.println("SUCCESS");
+    }
+    pox.setIRLedCurrent(MAX30100_LED_CURR_4_4MA);
+
+    // The default current for the IR LED is 50mA and it could be changed
+    //   by uncommenting the following line. Check MAX30100_Registers.h for all the
+    //   available options.
+    // pox.setIRLedCurrent(MAX30100_LED_CURR_7_6MA);
+
+    // Register a callback for the beat detection
+    pox.setOnBeatDetectedCallback(onBeatDetected);
 }
 
 /**
@@ -246,41 +246,15 @@ client.println(postBody);
  */
 void loop()
 {
-    //delay(1000);
-    while (0)
-    {
-        int gir = millis();
-        if (WiFi.status() == WL_NO_MODULE)
-        {
-            Serial.println();
-            Serial.println("Communication with WiFi module failed!");
-            // don't continue
-            //gonderemedim biriktir
-            //while (true);
-        }
-
-        if (WiFi.status() == WL_CONNECTED)
-        {
-
-            Serial.println("Connected");
-        }
-        else
-            Serial.println("LOST CONNECTION");
-        int cik = millis();
-        Serial.println(cik - gir);
-    }
-
     time_t seconds = time(NULL);
 
-    uint8_t whichMeasurement = COUGH_MES;
 
-    Serial.println("ANA LOOP");
 
     digitalWrite(9, HIGH);
     bool m = microphone_inference_record();
     if (!m)
     {
-        ei_printf("ERR: Failed to record audio...\n");
+        //ei_printf("ERR: Failed to record audio...\n");
         return;
     }
 
@@ -292,38 +266,30 @@ void loop()
     EI_IMPULSE_ERROR r = run_classifier_continuous(&signal, &result, debug_nn);
     if (r != EI_IMPULSE_OK)
     {
-        ei_printf("ERR: Failed to run classifier (%d)\n", r);
+        //ei_printf("ERR: Failed to run classifier (%d)\n", r);
         return;
     }
 
     if (++print_results >= (EI_CLASSIFIER_SLICES_PER_MODEL_WINDOW))
     {
-        // print the predictions
-        //  ei_printf("Predictions ");
-        // ei_printf("(DSP: %d ms., Classification: %d ms., Anomaly: %d ms.)",
-        //  result.timing.dsp, result.timing.classification, result.timing.anomaly);
-        //ei_printf(": \n");
         if (result.classification[0].value > 0.7000)
         {
-            cough_time_string = get_my_time();
-            //  Serial.println(get_my_time());
-            cough_time_string_array[coughnum] = cough_time_string;
+            ei_printf("****************COUGH DETECTED*************** \n");
+              ei_printf("Cough Count: %d", coughnum);
+              ei_printf("\n");
             String postMes = "\", \"cough\":true";
 
-            int a = send_wifi(postMes, whichMeasurement);
+            send_wifi(postMes, COUGH_MES);
             digitalWrite(LEDB, LOW);
             coughnum++;
         }
         else
             digitalWrite(LEDB, HIGH);
         windowcount++;
-        //ei_printf("    %s: %.5f\n", result.classification[0].label,
-        //result.classification[0].value);
-        // ei_printf("\n");
-        ei_printf("Cough Count: %d", coughnum);
+       /* ei_printf("Cough Count: %d", coughnum);
         ei_printf("\n");
         ei_printf("Window Count: %d", windowcount);
-        ei_printf("\n");
+        ei_printf("\n");*/
 
         /*my implementation*/
 
@@ -333,89 +299,112 @@ void loop()
 
         print_results = 0;
     }
-    Serial.println(localtime(&seconds)->tm_sec);
+    //Serial.println(localtime(&seconds)->tm_sec);
 
-    if (((localtime(&seconds)->tm_sec % 10) < 2))
+    if (((localtime(&seconds)->tm_sec) < 2) && (localtime(&seconds)->tm_min % 3 == 0) )
     {
-        temp_sensor_loop();
+        temp_sensor_loop(); //çift dakikalarda temp 
     }
+
+     if (((localtime(&seconds)->tm_sec) < 2) && (localtime(&seconds)->tm_min % 3 == 1) )
+    {
+        heartRateMeasurement(); //tek dakikalarda heartRate
+    }
+    if(Serial.available()) {
+        char x = Serial.read();
+       if( x  == 't') {
+             temp_sensor_loop(); //çift dakikalarda temp 
+       }
+       else if(x== 'h') {
+            heartRateMeasurement(); //tek dakikalarda heartRate
+       }
+    }
+    
 }
 // Task no.2: blink LED with 0.1 second delay.
-void loop2()
+void heartRateMeasurement()
 {
+     int heartRate = 0;
+        uint8_t spO2 = 0;
+    //pox.resume();
     // if there are incoming bytes available
     // from the server, read them and print them
-    while (1)
+    /* heart rate sensor task*/
+    if (!pox.begin())
     {
-
-        Serial.println("trying to send_wifi");
-        // send_wifi();
-        Serial.println("Waiting for available");
-        delay(10000);
-
-        /* while (client.available()) {
-    char c = client.read();
-    Serial.write(c);
-  }
-
-  // if the server's disconnected, stop the client
-  if (!client.connected()) {
-    Serial.println();
-    Serial.println("disconnecting from server.");
-    client.stop();
-    delay(5000);*/
-        yield();
+        Serial.println("FAILED");
+        for (;;)
+            ;
+    }
+    else
+    {
+        Serial.println("Heart Rate is being Measured...");
+    }
+    pox.setIRLedCurrent(MAX30100_LED_CURR_4_4MA);
+    pox.setOnBeatDetectedCallback(onBeatDetected);
+    int beatSeconds = 0;
+    while (beatSeconds< 15)
+    {
+        // Make sure to call update as fast as possible
+        pox.update();
+        
+        // Asynchronously dump heart rate and oxidation levels to the serial
+        // For both, a value of 0 means "invalid"
+        if (millis() - tsLastReport > REPORTING_PERIOD_MS)
+        {
+            Serial.println();
+            heartRate = (int)pox.getHeartRate();
+            spO2 = pox.getSpO2(); 
+            if(heartRate > 20 && spO2 > 20){
+                Serial.print("HeartRate = ");
+                Serial.print(String(heartRate));
+                Serial.print("   SpO2 =  ");
+                Serial.println(spO2 );
+            }
+            else {
+                Serial.println("Heart rate is being measured...");
+            }
+            beatSeconds++;
+            tsLastReport = millis();
+        }
         // do nothing forevermore
         //while (true);
     }
-}
+    heartRate = (int)pox.getHeartRate();
+    spO2 = pox.getSpO2();
+    if(heartRate > 0){
+        send_wifi(String(int(heartRate)), HEARTRATE_MES);
+    }    
+    if(spO2 > 55){
+        send_wifi(String(spO2), SPO2_MES);
+    }   
 
-// Task no.3: accept commands from Serial port
-// '0' turns off LED
-// '1' turns on LED
-void loop3()
-{
-    if (Serial.available())
-    {
-        char c = Serial.read();
-        if (c == '0')
-        {
-            digitalWrite(led1, LOW);
-            Serial.println("Led turned off!");
-        }
-        if (c == '1')
-        {
-            digitalWrite(led1, HIGH);
-            Serial.println("Led turned on!");
-        }
-    }
-
-    // IMPORTANT:
-    // We must call 'yield' at a regular basis to pass
-    // control to other tasks.
-    yield();
+    pox.shutdown(); 
 }
 
 void temp_sensor_loop()
 {
+    
 
-    uint8_t whichMeasurement;
-    String tempString2;
-    Serial.print("Ambient = ");
-    Serial.print(mlx.readAmbientTempC() + 4.0);
-    Serial.print("*C\tObject = ");
-    Serial.print(mlx.readObjectTempC() + 4.0);
-    tempString2 = String(mlx.readObjectTempC() + 4.0);
-    whichMeasurement = TEMP_MES;
-    int x = send_wifi(tempString2, whichMeasurement);
+    Serial.println(" ");
+    double sicaklik = 0;
+    sicaklik = mlx.readObjectTempC() +  4.0f;
+      Serial.print(String(sicaklik));
+    Serial.println("*C ");
 
-    Serial.println("looptan cıktı");
+    if(sicaklik > 34 && sicaklik < 47){
+    Serial.print(String(sicaklik));
+    Serial.println("*C ");
+    
+        send_wifi(String(sicaklik), TEMP_MES);
+         
+     }
+    
 }
 
 int send_wifi(String postMes, uint8_t whichMeasurement)
 {
-    //String postBody3= "{\"UID\":  \"1610054147005\", \"ts\": \"2021-05-15T14:06:08.000Z\", \"temperature\":35.5";
-    String postBody3 = "{\"UID\":  \"1610054147005\", \"ts\": \"2014-02-22T23:33:02.971Z\", \"temperature\":35.5 , \"cough\":true}]";
+   
     String postBody = "{\"UID\":  \"1\", \"ts\": \"";
 
     postBody += get_my_time();
@@ -432,19 +421,18 @@ int send_wifi(String postMes, uint8_t whichMeasurement)
         postBody += "}";
         break;
     case HEARTRATE_MES:
+        postBody += "\", \"heartRate\":";
+        postBody += postMes;
+        postBody += "}";
         break;
     case SPO2_MES:
+        postBody += "\", \"bloodOxygen\":";
+        postBody += postMes;
+        postBody += "}";
         break;
     default:
         break;
     }
-    Serial.println(postBody);
-    // postBody += "\", \"temperature\":37.7";
-    // postBody += ", \"cough\":true},";
-
-    //String post2= "\", \"cough\":true}";
-    // postBody += ", \"cough\":true}";
-    // postBody = postBody + post2;
 
     if (WiFi.status() == WL_NO_MODULE)
     {
@@ -457,45 +445,45 @@ int send_wifi(String postMes, uint8_t whichMeasurement)
     }
 
     // waiting for connection to Wifi network set with the SetupWiFiConnection sketch
-    Serial.println("Waiting for connection to WiFi");
+  //  Serial.println("Waiting for connection to WiFi");
     if (WiFi.status() != WL_CONNECTED) //bagli degilse notposted in sonuna ekle
     {
-        notPostedMeas = notPostedMeas + postBody +  ",";
+        notPostedMeas = notPostedMeas + postBody + ",";
         Serial.print('.');
         bulkIsNotSent = 1;
         return 0;
     }
-    else if(bulkIsNotSent)
+    else if (bulkIsNotSent)
     {
 
-        if (client.connect(server, 80))
+        if (client.connect(server, 5000))
         {
-            Serial.println("connected to server");
+           // Serial.println("connected to server");
 
             client.println(("POST /api/v1/bulk-symptoms HTTP/1.1"));
-            Serial.println("post 1");
+            //Serial.println("post 1");
 
             client.println("Connection: keep-alive");
-            Serial.println("post 2");
+            //Serial.println("post 2");
 
             client.println("Content-Type: application/json; charset=utf-8");
-            Serial.println("post 3");
+            //Serial.println("post 3");
 
-            client.println("Host:epsilon-backend-nswyg.run-eu-central1.goorm.io");
+            client.println("Host:localhost");
             // client.println("Host:localhost");
-            Serial.println("notpost 4");
+            //Serial.println("notpost 4");
 
             //client.println("Accept: */*");
 
             client.println("Content-Length: " + String(notPostedMeas.length() + 1));
-            Serial.println("notpost 5");
+            //Serial.println("notpost 5");
 
             client.println();
-            Serial.println("notpost 6");
+            //Serial.println("notpost 6");
 
             notPostedMeas[notPostedMeas.length() - 1] = ' ';
             notPostedMeas += "]";
-            Serial.println(notPostedMeas);
+            //Serial.println(notPostedMeas);
 
             client.println(notPostedMeas);
             Serial.println("notpost 7");
@@ -505,44 +493,48 @@ int send_wifi(String postMes, uint8_t whichMeasurement)
         bulkIsNotSent = 0;
     }
 
-    Serial.println();
-    Serial.println("Connected to WiFi network.");
+    //Serial.println();
+  //  Serial.println("Connected to WiFi network.");
 
-    Serial.println("Starting connection to server...");
-    if (client.connect(server, 80))
+    //Serial.println("Starting connection to server...");
+    if (client.connect(server, 5000))
     {
-        Serial.println("connected to server");
+      //  Serial.println("connected to server");
 
         client.println(("POST /api/v1/symptoms HTTP/1.1"));
-        Serial.println("post 1");
+       // Serial.println("post 1");
 
         client.println("Connection: keep-alive");
-        Serial.println("post 2");
+        //Serial.println("post 2");
 
         client.println("Content-Type: application/json; charset=utf-8");
-        Serial.println("post 3");
+       // Serial.println("post 3");
 
-        client.println("Host:epsilon-backend-nswyg.run-eu-central1.goorm.io");
+        client.println("Host:localhost");
         // client.println("Host:localhost");
-        Serial.println("post 4");
+       // Serial.println("post 4");
 
         //client.println("Accept: */*");
 
         client.println("Content-Length: " + String(postBody.length()));
-        Serial.println("post 5");
+       // Serial.println("post 5");
 
         client.println();
-        Serial.println("post 6");
+        //Serial.println("post 6");
 
         client.println(postBody);
-        Serial.println("post 7");
+       // Serial.println("post 7");
+
+       while (client.available()) {
+    char c = client.read();
+    Serial.write(c);
+  }
     }
+        //Serial.println(postBody);
+
     return 1;
 }
 
-void get_currentTime()
-{
-}
 
 /**
  * @brief      Printf function uses vsnprintf and output using Arduino Serial
@@ -661,9 +653,9 @@ static bool microphone_inference_record(void)
 
     if (inference.buf_ready == 1)
     {
-        ei_printf(
-            "Error sample buffer overrun. Decrease the number of slices per model window "
-            "(EI_CLASSIFIER_SLICES_PER_MODEL_WINDOW)\n");
+        // ei_printf(
+        //     "Error sample buffer overrun. Decrease the number of slices per model window "
+        //     "(EI_CLASSIFIER_SLICES_PER_MODEL_WINDOW)\n");
         ret = false;
     }
 
@@ -698,23 +690,6 @@ static void microphone_inference_end(void)
     free(sampleBuffer);
 }
 
-void printWifiStatus()
-{
-    // print the SSID of the network you're attached to
-    Serial.print("SSID: ");
-    Serial.println(WiFi.SSID());
-
-    // print your WiFi shield's IP address
-    IPAddress ip = WiFi.localIP();
-    Serial.print("IP Address: ");
-    Serial.println(ip);
-
-    // print the received signal strength
-    long rssi = WiFi.RSSI();
-    Serial.print("Signal strength (RSSI):");
-    Serial.print(rssi);
-    Serial.println(" dBm");
-}
 #if !defined(EI_CLASSIFIER_SENSOR) || EI_CLASSIFIER_SENSOR != EI_CLASSIFIER_SENSOR_MICROPHONE
 #error "Invalid model for current sensor."
 #endif

@@ -16,9 +16,11 @@ You should have received a copy of the GNU General Public License
 along with this program.  If not, see <http://www.gnu.org/licenses/>.
 */
 
-#include <Wire.h>
+#include <SoftwareI2C.h>
 
 #include "MAX30100.h"
+
+SoftwareI2C _i2c;
 
 MAX30100::MAX30100()
 {
@@ -26,8 +28,10 @@ MAX30100::MAX30100()
 
 bool MAX30100::begin()
 {
-    Wire.begin();
-    Wire.setClock(I2C_BUS_SPEED);
+    
+    _i2c.init(16,17);
+    _i2c.begin();
+    _i2c.setClock(I2C_BUS_SPEED);
 
     if (getPartId() != EXPECTED_PART_ID) {
         return false;
@@ -102,32 +106,32 @@ void MAX30100::resetFifo()
 
 uint8_t MAX30100::readRegister(uint8_t address)
 {
-    Wire.beginTransmission(MAX30100_I2C_ADDRESS);
-    Wire.write(address);
-    Wire.endTransmission(false);
-    Wire.requestFrom(MAX30100_I2C_ADDRESS, 1);
+    _i2c.beginTransmission(MAX30100_I2C_ADDRESS);
+    _i2c.write(address);
+    _i2c.endTransmission(false);
+    _i2c.requestFrom(MAX30100_I2C_ADDRESS, 1);
 
-    return Wire.read();
+    return _i2c.read();
 }
 
 void MAX30100::writeRegister(uint8_t address, uint8_t data)
 {
-    Wire.beginTransmission(MAX30100_I2C_ADDRESS);
-    Wire.write(address);
-    Wire.write(data);
-    Wire.endTransmission();
+    _i2c.beginTransmission(MAX30100_I2C_ADDRESS);
+    _i2c.write(address);
+    _i2c.write(data);
+    _i2c.endTransmission();
 }
 
 void MAX30100::burstRead(uint8_t baseAddress, uint8_t *buffer, uint8_t length)
 {
-    Wire.beginTransmission(MAX30100_I2C_ADDRESS);
-    Wire.write(baseAddress);
-    Wire.endTransmission(false);
-    Wire.requestFrom((uint8_t)MAX30100_I2C_ADDRESS, length);
+    _i2c.beginTransmission(MAX30100_I2C_ADDRESS);
+    _i2c.write(baseAddress);
+    _i2c.endTransmission(false);
+    _i2c.requestFrom((uint8_t)MAX30100_I2C_ADDRESS, length);
 
     uint8_t idx = 0;
-    while (Wire.available()) {
-        buffer[idx++] = Wire.read();
+    while (_i2c.available()) {
+        buffer[idx++] = _i2c.read();
     }
 }
 

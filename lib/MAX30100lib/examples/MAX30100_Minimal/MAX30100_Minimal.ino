@@ -19,6 +19,9 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
 #include <Wire.h>
 #include "MAX30100_PulseOximeter.h"
 
+/*Include temperature sensor*/
+#include <Adafruit_MLX90614.h>
+
 #define REPORTING_PERIOD_MS     1000
 
 // PulseOximeter is the higher level interface to the sensor
@@ -30,14 +33,31 @@ PulseOximeter pox;
 
 uint32_t tsLastReport = 0;
 
+/*Initialize temperature sensor object*/
+//Adafruit_MLX90614 mlx = Adafruit_MLX90614();
+
 // Callback (registered below) fired when a pulse is detected
 void onBeatDetected()
 {
     Serial.println("Beat!");
 }
 
+void temp_sensor_loop()
+{
+/*
+    Serial.print("Ambient = ");
+    Serial.print(mlx.readAmbientTempC() + 4.0);
+    Serial.print("*C\tObject = ");
+    Serial.print(mlx.readObjectTempC() + 4.0);
+    Serial.println();
+  delay(500);*/
+}
+
+
 void setup()
 {
+
+   //mlx.begin();
     Serial.begin(115200);
 
     Serial.print("Initializing pulse oximeter..");
@@ -51,6 +71,7 @@ void setup()
     } else {
         Serial.println("SUCCESS");
     }
+    pox.setIRLedCurrent(MAX30100_LED_CURR_4_4MA);
 
     // The default current for the IR LED is 50mA and it could be changed
     //   by uncommenting the following line. Check MAX30100_Registers.h for all the
@@ -58,11 +79,14 @@ void setup()
     // pox.setIRLedCurrent(MAX30100_LED_CURR_7_6MA);
 
     // Register a callback for the beat detection
-    pox.setOnBeatDetectedCallback(onBeatDetected);
+   // pox.setOnBeatDetectedCallback(onBeatDetected);
 }
 
 void loop()
 {
+    // Make sure to call update as fast as possible
+ 
+   // temp_sensor_loop();
     // Make sure to call update as fast as possible
     pox.update();
 
@@ -77,4 +101,6 @@ void loop()
 
         tsLastReport = millis();
     }
+  
+
 }

@@ -138,7 +138,7 @@ String get_my_time() {
         char buffer[32];
         
         char* returnBuffer;
-        strftime(buffer, 32, "%Y-%m-%eT%H:%M:%S.000Z", localtime(&seconds));
+        strftime(buffer, 32, "%Y-%m-%dT%H:%M:%S.000Z", localtime(&seconds));
 
         String returnString;
         returnString = buffer;

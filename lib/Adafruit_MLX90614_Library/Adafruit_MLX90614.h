@@ -20,7 +20,6 @@
 #else
 #include "WProgram.h"
 #endif
-#include "Wire.h"
 
 #define MLX90614_I2CADDR 0x5A
 

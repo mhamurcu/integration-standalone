@@ -59,6 +59,8 @@ public:
     void resume();
     uint8_t getPartId();
 
+
+
 private:
     CircularBuffer<SensorReadout, RINGBUFFER_SIZE> readoutsBuffer;
 

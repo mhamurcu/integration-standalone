@@ -17,6 +17,7 @@
  ****************************************************/
 
 #include "Adafruit_MLX90614.h"
+#include <Wire.h>
 /**
  * @brief Construct a new Adafruit_MLX90614::Adafruit_MLX90614 object
  *
@@ -29,7 +30,8 @@ Adafruit_MLX90614::Adafruit_MLX90614(uint8_t i2caddr) { _addr = i2caddr; }
  * @return bool  Always returns true
  */
 bool Adafruit_MLX90614::begin(void) {
-  Wire.begin();
+ // initialise as sda,scl = 0,1 
+Wire.begin(); // sda, scl are now set
 
   /*
   for (uint8_t i=0; i<0x20; i++) {
